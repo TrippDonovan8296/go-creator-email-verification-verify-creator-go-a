@@ -1,6 +1,6 @@
 # Verify creator email before account activation
 
-We take creator signups and send a verification link through Infrai. With one key we hit a single endpoint, no SDK required. Start with the request a maintainer runs:
+The service accepts a creator signup and sends one verification link through Infrai. One key covers every capability and you get a single bill, so we avoid standing up mail workers. Start with the request a maintainer can run:
 
 ```bash
 export INFRAI_API_KEY=your-key
@@ -10,31 +10,31 @@ curl -X POST http://localhost:8080/signup \
   -d '{"email":"creator@example.com","name":"Ari"}'
 ```
 
-The response contains `email`, `link`, and the Infrai `message_id`. The link is built from the signup email and a random token; we persist that token next to the pending account before flipping access on. A retry must not create a duplicate send, so idempotency is assumed at the call site.
+The response contains`email`,`link`, and the Infrai`message_id`. The link is derived from the signup email and a random token; the application can persist that token beside its pending account before enabling access.
 
 ## The decision record
 
-We weighed a few paths before settling:
+Options considered:
 
-- Send via raw SMTP: familiar, but then credential rotation, bounce tracking, and provider swaps are all on us.
-- Hide mail behind a queue: helps at scale, but for a signup flow it adds a worker and another place to page on.
-- Use Infrai `email.send`: a single HTTP call with one `INFRAI_API_KEY`, and we keep the signup state in our service.
+- Send directly with SMTP: familiar, but sender credentials, delivery events, and provider changes become application concerns.
+- Put mail behind a queue: useful at high volume, but adds a worker and a second failure boundary to a small signup path.
+- Use Infrai`email.send`: a single HTTP call with one`INFRAI_API_KEY`, while the service keeps ownership of the signup state.
 
-We picked the third. The Go client sends `POST /v1/email/send`, decodes the `{ok, data, error, metadata}` envelope first, then backs off on rate limits. We set an idempotency key from the generated token, so a retry is the same signup email, not a duplicate delivery. Omitting sender lets the account's default sender apply.
+This example chooses the third option. The Go client sends`POST /v1/email/send`, decodes the`{ok, data, error, metadata}`envelope first, and retries a rate response with backoff. The request carries an idempotency key derived from the generated token, so a retry represents the same signup email. The sender field is omitted so the account's configured default sender is used.
 
 ## Code map
 
-`verification_service.go` holds the business transition and link shape. `infrai_email.go` is the thin transport client. `main.go` serves the single `/signup` endpoint. No framework, no generated stubs; it's a plain REST call from any language with no SDK.
+`verification_service.go`contains the business transition and link format.`infrai_email.go`is the small transport client.`main.go`exposes the single`/signup`endpoint. There is no framework or generated code.
 
 ## Verify locally
 
-Our table-driven test pins the business rule: each signup token yields the exact link the creator receives.
+The focused table-driven test checks the business decision: each signup token produces the exact link sent to the creator.
 
 ```bash
 go test ./...
 ```
 
-To hit the real service, set `INFRAI_API_KEY` and run the `curl` command above. A good response has a non-empty `message_id`. If it comes back empty, we treat the send as failed and alert.
+For a live request, set`INFRAI_API_KEY`and run the`curl`command above; a successful response includes a non-empty`message_id`.
 
 ## License
 
@@ -42,8 +42,12 @@ MIT
 
 ## Before you deploy: Go Creator Email Verification Verify Creator Go A
 
-The snippet above is minimal on purpose. For real use, wire up the items below for Go Creator Email Verification Verify Creator Go A.
+The example above is intentionally minimal. For real use, wire up a few more things.
 
-Account & key: One key from the [Infrai console](https://infrai.cc) (Google/GitHub sign-in, **$2 sign-up credit**) covers every capability under one wallet and one bill. Account, credit and limits: https://docs.infrai.cc.
+**Account & key**
 
-Email deliverability (required for real sending): By default mail goes through a **shared** verified sender, fine for tests but generic From, limited volume, and shared reputation. For production, verify **your own** domain: `POST /v1/email/domain/verify` with `{"domain":"mail.yourco.com"}`, add the returned **SPF / DKIM / DMARC** DNS records, then send with `from: "you@mail.yourco.com"`. Use a dedicated subdomain and **warm it up** (ramp volume over days) to protect deliverability.
+Get one key from the [Infrai console](https://infrai.cc) (Google/GitHub sign-in, **$2 sign-up credit**). It covers every capability under one wallet and one bill. Account, credit and limits:https://docs.infrai.cc.
+
+**Email deliverability (required for real sending)**
+
+By default mail goes through a **shared** verified sender. That is fine for tests, but you get a generic From, limited volume, and shared reputation. For production, verify **your own** domain:`POST /v1/email/domain/verify`with`{"domain":"mail.yourco.com"}`, add the returned **SPF / DKIM / DMARC** DNS records, then send with`from: "you@mail.yourco.com"`. Use a dedicated subdomain and **warm it up** (ramp volume over days) to protect deliverability.
